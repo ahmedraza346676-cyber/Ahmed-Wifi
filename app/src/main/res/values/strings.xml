@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">NetLedger</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="sign_out">Sign out</string>
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_subscribers">Subscribers</string>
+    <string name="nav_billing">Billing</string>
+    <string name="add_subscriber">Add Subscriber</string>
+    <string name="edit_subscriber">Edit Subscriber</string>
+    <string name="record_payment">Record Payment</string>
+    <string name="generate_monthly_bills">Run Monthly Billing</string>
+    <string name="search_hint">Search name, ID, CNIC, phone, area…</string>
+</resources>

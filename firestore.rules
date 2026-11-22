@@ -1,0 +1,181 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. Entity Validation Helpers
+    function isValidSubscriber(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.subscriberCode is string &&
+             data.subscriberCode.size() >= 1 &&
+             data.subscriberCode.size() <= 40 &&
+             data.fullName is string &&
+             data.fullName.size() >= 1 &&
+             data.fullName.size() <= 80 &&
+             data.phoneNumber is string &&
+             data.phoneNumber.size() >= 5 &&
+             data.phoneNumber.size() <= 25 &&
+             data.cnic is string &&
+             data.cnic.size() >= 5 &&
+             data.cnic.size() <= 20 &&
+             data.location is string &&
+             data.location.size() >= 1 &&
+             data.location.size() <= 160 &&
+             data.areaZone is string &&
+             data.areaZone.size() <= 60 &&
+             data.packageName is string &&
+             data.packageName.size() <= 60 &&
+             data.status in ['ACTIVE', 'NEW', 'SUSPENDED'] &&
+             data.monthlyBill is int &&
+             data.monthlyBill >= 0 &&
+             data.monthlyBill <= 10000000 &&
+             data.pendingBill is int &&
+             data.pendingBill >= 0 &&
+             data.pendingBill <= 100000000 &&
+             data.totalPaid is int &&
+             data.totalPaid >= 0 &&
+             data.totalPaid <= 1000000000 &&
+             data.lastBilledMonth is string &&
+             data.lastBilledMonth.size() <= 20 &&
+             data.notes is string &&
+             data.notes.size() <= 300 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isProfileUpdateAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+        'subscriberCode',
+        'fullName',
+        'phoneNumber',
+        'cnic',
+        'location',
+        'areaZone',
+        'packageName',
+        'status',
+        'monthlyBill',
+        'pendingBill',
+        'totalPaid',
+        'lastBilledMonth',
+        'notes',
+        'updatedAt'
+      ]);
+    }
+
+    function isBillingUpdateAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+        'pendingBill',
+        'totalPaid',
+        'lastBilledMonth',
+        'status',
+        'updatedAt'
+      ]);
+    }
+
+    function isValidPayment(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             isValidId(data.subscriberId) &&
+             data.subscriberName is string &&
+             data.subscriberName.size() >= 1 &&
+             data.subscriberName.size() <= 80 &&
+             data.subscriberCode is string &&
+             data.subscriberCode.size() >= 1 &&
+             data.subscriberCode.size() <= 40 &&
+             data.amount is int &&
+             data.amount > 0 &&
+             data.amount <= 100000000 &&
+             data.billingMonth is string &&
+             data.billingMonth.size() >= 1 &&
+             data.billingMonth.size() <= 20 &&
+             data.paymentMethod in ['CASH', 'JAZZCASH', 'EASYPAISA', 'BANK'] &&
+             data.note is string &&
+             data.note.size() <= 200 &&
+             data.paidAt is timestamp &&
+             data.paidAt <= request.time &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time;
+    }
+
+    // 4. User-Scoped ISP Subscriber & Payment Collections
+    match /users/{userId}/subscribers/{subscriberId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(subscriberId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(subscriberId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'subscriberCode', 'fullName', 'phoneNumber',
+                         'cnic', 'location', 'areaZone', 'packageName', 'status',
+                         'monthlyBill', 'pendingBill', 'totalPaid', 'lastBilledMonth',
+                         'notes', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'subscriberCode', 'fullName', 'phoneNumber',
+                         'cnic', 'location', 'areaZone', 'packageName', 'status',
+                         'monthlyBill', 'pendingBill', 'totalPaid', 'lastBilledMonth',
+                         'notes', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidSubscriber(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(subscriberId) &&
+                       isValidSubscriber(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (isProfileUpdateAction() || isBillingUpdateAction());
+
+      allow delete: if isOwner(userId) && isValidId(subscriberId);
+    }
+
+    match /users/{userId}/payments/{paymentId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(paymentId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(paymentId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'subscriberId', 'subscriberName', 'subscriberCode',
+                         'amount', 'billingMonth', 'paymentMethod', 'note',
+                         'paidAt', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'subscriberId', 'subscriberName', 'subscriberCode',
+                         'amount', 'billingMonth', 'paymentMethod', 'note',
+                         'paidAt', 'createdAt'
+                       ]) &&
+                       isValidPayment(incoming(), userId) &&
+                       existsAfter(/databases/$(database)/documents/users/$(userId)/subscribers/$(incoming().subscriberId));
+
+      allow update: if false;
+      allow delete: if isOwner(userId) && isValidId(paymentId);
+    }
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "Subscriber": {
+      "title": "Subscriber",
+      "description": "An ISP internet subscriber profile with identity, location, monthly billing plan, pending dues, and cumulative paid totals.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated operator UID owning this subscriber record."
+        },
+        "subscriberCode": {
+          "type": "string",
+          "description": "ISP User ID or PPPoE login identifier (e.g., NET-1042)."
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Full name of the internet subscriber."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Primary mobile or contact number."
+        },
+        "cnic": {
+          "type": "string",
+          "description": "National identity card (CNIC) number."
+        },
+        "location": {
+          "type": "string",
+          "description": "Street address or installation location."
+        },
+        "areaZone": {
+          "type": "string",
+          "description": "Sector, block, or neighborhood zone for route grouping."
+        },
+        "packageName": {
+          "type": "string",
+          "description": "Internet bandwidth package name (e.g., 30 Mbps Fiber)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "NEW", "SUSPENDED"],
+          "description": "Connection lifecycle status."
+        },
+        "monthlyBill": {
+          "type": "integer",
+          "description": "Recurring monthly subscription fee in PKR."
+        },
+        "pendingBill": {
+          "type": "integer",
+          "description": "Current unpaid outstanding balance in PKR."
+        },
+        "totalPaid": {
+          "type": "integer",
+          "description": "Cumulative amount paid to date in PKR."
+        },
+        "lastBilledMonth": {
+          "type": "string",
+          "description": "Most recent YYYY-MM cycle billed to this subscriber."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional installation, router, or billing notes."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when subscriber was added (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when subscriber was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "subscriberCode",
+        "fullName",
+        "phoneNumber",
+        "cnic",
+        "location",
+        "areaZone",
+        "packageName",
+        "status",
+        "monthlyBill",
+        "pendingBill",
+        "totalPaid",
+        "lastBilledMonth",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Immutable receipt record for a collected subscriber bill payment.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated operator UID owning this payment receipt."
+        },
+        "subscriberId": {
+          "type": "string",
+          "description": "Document ID of the subscriber who paid."
+        },
+        "subscriberName": {
+          "type": "string",
+          "description": "Denormalized subscriber full name at time of payment."
+        },
+        "subscriberCode": {
+          "type": "string",
+          "description": "Denormalized subscriber User ID at time of payment."
+        },
+        "amount": {
+          "type": "integer",
+          "description": "Collected payment amount in PKR."
+        },
+        "billingMonth": {
+          "type": "string",
+          "description": "Billing cycle label (e.g., 2026-11)."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["CASH", "JAZZCASH", "EASYPAISA", "BANK"],
+          "description": "Payment channel used."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional transaction reference or collector note."
+        },
+        "paidAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of payment collection (FieldValue.serverTimestamp())."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of receipt creation (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "subscriberId",
+        "subscriberName",
+        "subscriberCode",
+        "amount",
+        "billingMonth",
+        "paymentMethod",
+        "note",
+        "paidAt",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/subscribers/{subscriberId}": {
+      "schema": { "$ref": "#/entities/Subscriber" },
+      "description": "User-isolated collection of ISP subscribers."
+    },
+    "/users/{userId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "User-isolated collection of subscriber bill payment receipts."
+    }
+  }
+}
