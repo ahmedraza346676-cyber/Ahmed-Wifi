@@ -2,5 +2,7 @@
   "name": "NetLedger",
   "description": "ISP subscriber management and billing tracking dashboard with CNIC records, location, pending dues, monthly fees, and paid bill history.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
