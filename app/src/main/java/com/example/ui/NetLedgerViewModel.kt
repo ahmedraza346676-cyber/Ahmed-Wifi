@@ -9,8 +9,6 @@ import com.example.data.model.Payment
 import com.example.data.model.PaymentMethod
 import com.example.data.model.Subscriber
 import com.example.data.model.SubscriberStatus
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,20 +62,15 @@ data class DashboardSummary(
 
 class NetLedgerViewModel(
     private val repository: NetLedgerRepository,
-    private val currentUserId: String,
 ) : ViewModel() {
 
     val subscribersState: StateFlow<UiState<List<Subscriber>>> =
-        repository.observeSubscribers(currentUserId)
+        repository.observeSubscribers()
             .map<List<Subscriber>, UiState<List<Subscriber>>> { UiState.Success(it) }
             .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                val rootError = firestoreError ?: error
-                Log.w(TAG, "Error observing subscribers", rootError)
-                emit(UiState.Error(rootError.localizedMessage ?: "Failed to load subscribers"))
+                if (error is CancellationException) throw error
+                Log.w(TAG, "Error observing subscribers", error)
+                emit(UiState.Error(error.localizedMessage ?: "Failed to load subscribers"))
             }
             .stateIn(
                 scope = viewModelScope,
@@ -86,16 +79,12 @@ class NetLedgerViewModel(
             )
 
     val paymentsState: StateFlow<UiState<List<Payment>>> =
-        repository.observePayments(currentUserId)
+        repository.observePayments()
             .map<List<Payment>, UiState<List<Payment>>> { UiState.Success(it) }
             .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                val rootError = firestoreError ?: error
-                Log.w(TAG, "Error observing payments", rootError)
-                emit(UiState.Error(rootError.localizedMessage ?: "Failed to load payment history"))
+                if (error is CancellationException) throw error
+                Log.w(TAG, "Error observing payments", error)
+                emit(UiState.Error(error.localizedMessage ?: "Failed to load payment history"))
             }
             .stateIn(
                 scope = viewModelScope,
@@ -206,7 +195,7 @@ class NetLedgerViewModel(
         when (sort) {
             SubscriberSort.PENDING_DESC -> filtered.sortedByDescending { it.pendingBill }
             SubscriberSort.NAME_ASC -> filtered.sortedBy { it.fullName.lowercase() }
-            SubscriberSort.RECENT -> filtered.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            SubscriberSort.RECENT -> filtered.sortedByDescending { it.createdAtMillis }
         }
     }.stateIn(
         scope = viewModelScope,

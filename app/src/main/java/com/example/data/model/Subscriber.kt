@@ -1,15 +1,12 @@
 package com.example.data.model
 
-import androidx.annotation.Keep
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.IgnoreExtraProperties
-import com.google.firebase.firestore.ServerTimestamp
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 enum class SubscriberStatus(val label: String) {
     ACTIVE("Active"),
@@ -34,11 +31,9 @@ enum class PaymentMethod(val label: String) {
     }
 }
 
-@Keep
-@IgnoreExtraProperties
+@Entity(tableName = "subscribers")
 data class Subscriber(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val subscriberCode: String = "",
     val fullName: String = "",
     val phoneNumber: String = "",
@@ -52,57 +47,19 @@ data class Subscriber(
     val totalPaid: Long = 0L,
     val lastBilledMonth: String = "",
     val notes: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val updatedAtMillis: Long = System.currentTimeMillis(),
 ) {
     val parsedStatus: SubscriberStatus
         get() = SubscriberStatus.fromRaw(status)
 
     val hasPendingDues: Boolean
         get() = pendingBill > 0L
-
-    fun toCreateMap(ownerUid: String): Map<String, Any> = mapOf(
-        "userId" to ownerUid,
-        "subscriberCode" to subscriberCode.trim(),
-        "fullName" to fullName.trim(),
-        "phoneNumber" to phoneNumber.trim(),
-        "cnic" to cnic.trim(),
-        "location" to location.trim(),
-        "areaZone" to areaZone.trim(),
-        "packageName" to packageName.trim(),
-        "status" to SubscriberStatus.fromRaw(status).name,
-        "monthlyBill" to monthlyBill.coerceIn(0L, 10_000_000L),
-        "pendingBill" to pendingBill.coerceIn(0L, 100_000_000L),
-        "totalPaid" to totalPaid.coerceIn(0L, 1_000_000_000L),
-        "lastBilledMonth" to lastBilledMonth.trim(),
-        "notes" to notes.trim(),
-        "createdAt" to FieldValue.serverTimestamp(),
-        "updatedAt" to FieldValue.serverTimestamp(),
-    )
-
-    fun toProfileUpdateMap(): Map<String, Any> = mapOf(
-        "subscriberCode" to subscriberCode.trim(),
-        "fullName" to fullName.trim(),
-        "phoneNumber" to phoneNumber.trim(),
-        "cnic" to cnic.trim(),
-        "location" to location.trim(),
-        "areaZone" to areaZone.trim(),
-        "packageName" to packageName.trim(),
-        "status" to SubscriberStatus.fromRaw(status).name,
-        "monthlyBill" to monthlyBill.coerceIn(0L, 10_000_000L),
-        "pendingBill" to pendingBill.coerceIn(0L, 100_000_000L),
-        "totalPaid" to totalPaid.coerceIn(0L, 1_000_000_000L),
-        "lastBilledMonth" to lastBilledMonth.trim(),
-        "notes" to notes.trim(),
-        "updatedAt" to FieldValue.serverTimestamp(),
-    )
 }
 
-@Keep
-@IgnoreExtraProperties
+@Entity(tableName = "payments")
 data class Payment(
-    @DocumentId val id: String = "",
-    val userId: String = "",
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val subscriberId: String = "",
     val subscriberName: String = "",
     val subscriberCode: String = "",
@@ -110,8 +67,8 @@ data class Payment(
     val billingMonth: String = "",
     val paymentMethod: String = PaymentMethod.CASH.name,
     val note: String = "",
-    @ServerTimestamp val paidAt: Timestamp? = null,
-    @ServerTimestamp val createdAt: Timestamp? = null,
+    val paidAtMillis: Long = System.currentTimeMillis(),
+    val createdAtMillis: Long = System.currentTimeMillis(),
 ) {
     val parsedMethod: PaymentMethod
         get() = PaymentMethod.fromRaw(paymentMethod)
@@ -138,14 +95,14 @@ object BillingFormatters {
         }
     }
 
-    fun formatTimestamp(ts: Timestamp?): String {
-        val date = ts?.toDate() ?: return "Just now"
-        return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(date)
+    fun formatTimestamp(millis: Long): String {
+        if (millis <= 0L) return "Just now"
+        return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date(millis))
     }
 
-    fun formatShortDate(ts: Timestamp?): String {
-        val date = ts?.toDate() ?: return "Today"
-        return SimpleDateFormat("dd MMM yyyy", Locale.US).format(date)
+    fun formatShortDate(millis: Long): String {
+        if (millis <= 0L) return "Today"
+        return SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(millis))
     }
 
     /** Formats digits into 12345-1234567-1 pattern while typing CNIC */

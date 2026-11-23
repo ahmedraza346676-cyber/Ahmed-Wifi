@@ -5,7 +5,6 @@ import com.example.data.model.PaymentMethod
 import com.example.data.model.Subscriber
 import com.example.data.model.SubscriberStatus
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,9 +18,8 @@ class NetLedgerModelTest {
     }
 
     @Test
-    fun `subscriber create map excludes id and includes all rule-required keys`() {
+    fun `subscriber defaults and due check work correctly`() {
         val sub = Subscriber(
-            id = "doc_123",
             subscriberCode = "NET-1001",
             fullName = "Zain Ali",
             phoneNumber = "0300-1112233",
@@ -36,13 +34,9 @@ class NetLedgerModelTest {
             lastBilledMonth = "2026-11",
             notes = "ONU near gate"
         )
-        val map = sub.toCreateMap("uid_abc")
-        assertFalse(map.containsKey("id"))
-        assertEquals("uid_abc", map["userId"])
-        assertEquals("NET-1001", map["subscriberCode"])
-        assertEquals(16, map.size)
-        assertTrue(map.containsKey("createdAt"))
-        assertTrue(map.containsKey("updatedAt"))
+        assertTrue(sub.id.isNotBlank())
+        assertTrue(sub.hasPendingDues)
+        assertEquals(SubscriberStatus.NEW, sub.parsedStatus)
     }
 
     @Test

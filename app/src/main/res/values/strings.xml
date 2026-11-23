@@ -1,7 +1,5 @@
 <resources>
     <string name="app_name">NetLedger</string>
-    <string name="sign_in_google">Sign in with Google</string>
-    <string name="sign_out">Sign out</string>
     <string name="nav_dashboard">Dashboard</string>
     <string name="nav_subscribers">Subscribers</string>
     <string name="nav_billing">Billing</string>

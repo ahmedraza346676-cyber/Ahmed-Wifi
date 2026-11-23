@@ -1,170 +1,113 @@
 package com.example.data
 
 import android.content.Context
-import com.example.R
+import com.example.data.local.NetLedgerDao
+import com.example.data.local.NetLedgerDatabase
 import com.example.data.model.Payment
 import com.example.data.model.PaymentMethod
 import com.example.data.model.Subscriber
 import com.example.data.model.SubscriberStatus
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 class NetLedgerRepository(
-    private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth,
+    private val dao: NetLedgerDao,
 ) {
     constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        )
+        NetLedgerDatabase.getInstance(context).netLedgerDao()
     )
 
-    private fun requireUserId(): String =
-        auth.currentUser?.uid?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("Please sign in with Google before accessing NetLedger.")
+    fun observeSubscribers(): Flow<List<Subscriber>> = dao.observeSubscribers()
 
-    fun observeSubscribers(userId: String): Flow<List<Subscriber>> = flow {
-        val uid = userId.takeIf { it.isNotBlank() } ?: requireUserId()
-        val path = "users/$uid/subscribers"
-        emitAll(
-            db.collection("users").document(uid).collection("subscribers")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .snapshots()
-                .map { snapshot ->
-                    snapshot.toObjects(
-                        Subscriber::class.java,
-                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    )
-                }
-                .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val exceptionToLog = firestoreError ?: (error as? Exception)
-                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
-                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
-                    }
-                    throw error
-                }
-        )
-    }
-
-    fun observePayments(userId: String): Flow<List<Payment>> = flow {
-        val uid = userId.takeIf { it.isNotBlank() } ?: requireUserId()
-        val path = "users/$uid/payments"
-        emitAll(
-            db.collection("users").document(uid).collection("payments")
-                .orderBy("paidAt", Query.Direction.DESCENDING)
-                .snapshots()
-                .map { snapshot ->
-                    snapshot.toObjects(
-                        Payment::class.java,
-                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    )
-                }
-                .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val exceptionToLog = firestoreError ?: (error as? Exception)
-                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
-                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
-                    }
-                    throw error
-                }
-        )
-    }
+    fun observePayments(): Flow<List<Payment>> = dao.observePayments()
 
     suspend fun addSubscriber(subscriber: Subscriber): Result<String> {
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/subscribers"
         return try {
-            val uid = requireUserId()
             validateSubscriberInput(subscriber)
+            val now = System.currentTimeMillis()
+            val newId = subscriber.id.ifBlank { UUID.randomUUID().toString() }
+            val cleanSubscriber = subscriber.copy(
+                id = newId,
+                subscriberCode = subscriber.subscriberCode.trim(),
+                fullName = subscriber.fullName.trim(),
+                phoneNumber = subscriber.phoneNumber.trim(),
+                cnic = subscriber.cnic.trim(),
+                location = subscriber.location.trim(),
+                areaZone = subscriber.areaZone.trim(),
+                packageName = subscriber.packageName.trim(),
+                status = SubscriberStatus.fromRaw(subscriber.status).name,
+                monthlyBill = subscriber.monthlyBill.coerceIn(0L, 10_000_000L),
+                pendingBill = subscriber.pendingBill.coerceIn(0L, 100_000_000L),
+                totalPaid = subscriber.totalPaid.coerceIn(0L, 1_000_000_000L),
+                lastBilledMonth = subscriber.lastBilledMonth.trim(),
+                notes = subscriber.notes.trim(),
+                createdAtMillis = now,
+                updatedAtMillis = now,
+            )
 
-            val subscribersRef = db.collection("users").document(uid).collection("subscribers")
-            val docRef = subscribersRef.document()
-            docPath = docRef.path
-
-            val batch = db.batch()
-            batch.set(docRef, subscriber.toCreateMap(uid))
-
-            if (subscriber.totalPaid > 0L) {
-                val paymentRef = db.collection("users").document(uid).collection("payments").document()
-                val initialPaymentPayload = mapOf(
-                    "userId" to uid,
-                    "subscriberId" to docRef.id,
-                    "subscriberName" to subscriber.fullName.trim(),
-                    "subscriberCode" to subscriber.subscriberCode.trim(),
-                    "amount" to subscriber.totalPaid.coerceIn(1L, 100_000_000L),
-                    "billingMonth" to subscriber.lastBilledMonth.ifBlank { "Initial" }.take(20),
-                    "paymentMethod" to PaymentMethod.CASH.name,
-                    "note" to "Opening paid balance",
-                    "paidAt" to FieldValue.serverTimestamp(),
-                    "createdAt" to FieldValue.serverTimestamp(),
+            val initialPayment = if (cleanSubscriber.totalPaid > 0L) {
+                Payment(
+                    subscriberId = newId,
+                    subscriberName = cleanSubscriber.fullName,
+                    subscriberCode = cleanSubscriber.subscriberCode,
+                    amount = cleanSubscriber.totalPaid,
+                    billingMonth = cleanSubscriber.lastBilledMonth.ifBlank { "Initial" }.take(20),
+                    paymentMethod = PaymentMethod.CASH.name,
+                    note = "Opening paid balance",
+                    paidAtMillis = now,
+                    createdAtMillis = now,
                 )
-                batch.set(paymentRef, initialPaymentPayload)
+            } else {
+                null
             }
 
-            batch.commit().await()
-            Result.success(docRef.id)
+            dao.insertSubscriberWithOptionalPayment(cleanSubscriber, initialPayment)
+            Result.success(newId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docPath)
             Result.failure(e)
         }
     }
 
     suspend fun updateSubscriber(subscriber: Subscriber): Result<Unit> {
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/subscribers/${subscriber.id}"
         return try {
-            val uid = requireUserId()
             require(subscriber.id.isNotBlank()) { "Subscriber ID cannot be blank" }
             validateSubscriberInput(subscriber)
-
-            val docRef = db.collection("users").document(uid)
-                .collection("subscribers").document(subscriber.id)
-            docPath = docRef.path
-            docRef.update(subscriber.toProfileUpdateMap()).await()
+            val updated = subscriber.copy(
+                subscriberCode = subscriber.subscriberCode.trim(),
+                fullName = subscriber.fullName.trim(),
+                phoneNumber = subscriber.phoneNumber.trim(),
+                cnic = subscriber.cnic.trim(),
+                location = subscriber.location.trim(),
+                areaZone = subscriber.areaZone.trim(),
+                packageName = subscriber.packageName.trim(),
+                status = SubscriberStatus.fromRaw(subscriber.status).name,
+                monthlyBill = subscriber.monthlyBill.coerceIn(0L, 10_000_000L),
+                pendingBill = subscriber.pendingBill.coerceIn(0L, 100_000_000L),
+                totalPaid = subscriber.totalPaid.coerceIn(0L, 1_000_000_000L),
+                lastBilledMonth = subscriber.lastBilledMonth.trim(),
+                notes = subscriber.notes.trim(),
+                updatedAtMillis = System.currentTimeMillis(),
+            )
+            dao.updateSubscriber(updated)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docPath)
             Result.failure(e)
         }
     }
 
     suspend fun deleteSubscriber(subscriberId: String): Result<Unit> {
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/subscribers/$subscriberId"
         return try {
-            val uid = requireUserId()
             require(subscriberId.isNotBlank()) { "Subscriber ID cannot be blank" }
-            val docRef = db.collection("users").document(uid)
-                .collection("subscribers").document(subscriberId)
-            docPath = docRef.path
-            docRef.delete().await()
+            dao.deleteSubscriberById(subscriberId)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, docPath)
             Result.failure(e)
         }
     }
@@ -176,21 +119,13 @@ class NetLedgerRepository(
         method: PaymentMethod,
         note: String,
     ): Result<Unit> {
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/payments"
         return try {
-            val uid = requireUserId()
             require(subscriber.id.isNotBlank()) { "Subscriber ID cannot be blank" }
             require(amount in 1L..100_000_000L) { "Payment amount must be greater than zero" }
             val cleanMonth = billingMonth.trim().take(20)
             require(cleanMonth.isNotEmpty()) { "Billing month is required" }
-            val cleanNote = note.trim().take(200)
 
-            val subRef = db.collection("users").document(uid)
-                .collection("subscribers").document(subscriber.id)
-            val payRef = db.collection("users").document(uid)
-                .collection("payments").document()
-            docPath = payRef.path
-
+            val now = System.currentTimeMillis()
             val newPending = (subscriber.pendingBill - amount).coerceAtLeast(0L)
             val newTotalPaid = (subscriber.totalPaid + amount).coerceAtMost(1_000_000_000L)
             val nextStatus = if (subscriber.parsedStatus == SubscriberStatus.NEW) {
@@ -199,38 +134,31 @@ class NetLedgerRepository(
                 subscriber.parsedStatus.name
             }
 
-            val batch = db.batch()
-            batch.set(
-                payRef,
-                mapOf(
-                    "userId" to uid,
-                    "subscriberId" to subscriber.id,
-                    "subscriberName" to subscriber.fullName.trim().take(80),
-                    "subscriberCode" to subscriber.subscriberCode.trim().take(40),
-                    "amount" to amount,
-                    "billingMonth" to cleanMonth,
-                    "paymentMethod" to method.name,
-                    "note" to cleanNote,
-                    "paidAt" to FieldValue.serverTimestamp(),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                )
+            val payment = Payment(
+                subscriberId = subscriber.id,
+                subscriberName = subscriber.fullName.trim().take(80),
+                subscriberCode = subscriber.subscriberCode.trim().take(40),
+                amount = amount,
+                billingMonth = cleanMonth,
+                paymentMethod = method.name,
+                note = note.trim().take(200),
+                paidAtMillis = now,
+                createdAtMillis = now,
             )
-            batch.update(
-                subRef,
-                mapOf(
-                    "pendingBill" to newPending,
-                    "totalPaid" to newTotalPaid,
-                    "lastBilledMonth" to cleanMonth,
-                    "status" to nextStatus,
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                )
+
+            val updatedSubscriber = subscriber.copy(
+                pendingBill = newPending,
+                totalPaid = newTotalPaid,
+                lastBilledMonth = cleanMonth,
+                status = nextStatus,
+                updatedAtMillis = now,
             )
-            batch.commit().await()
+
+            dao.recordPaymentTransaction(payment, updatedSubscriber)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docPath)
             Result.failure(e)
         }
     }
@@ -239,12 +167,11 @@ class NetLedgerRepository(
         subscribers: List<Subscriber>,
         monthKey: String,
     ): Result<Int> {
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/subscribers"
         return try {
-            val uid = requireUserId()
             val cleanMonth = monthKey.trim().take(20)
             require(cleanMonth.isNotEmpty()) { "Billing month is required" }
 
+            val now = System.currentTimeMillis()
             val eligible = subscribers.filter { sub ->
                 sub.id.isNotBlank() &&
                     sub.parsedStatus != SubscriberStatus.SUSPENDED &&
@@ -253,30 +180,18 @@ class NetLedgerRepository(
             }
             if (eligible.isEmpty()) return Result.success(0)
 
-            // Firestore batch limit is 500 writes
-            eligible.chunked(450).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { sub ->
-                    val subRef = db.collection("users").document(uid)
-                        .collection("subscribers").document(sub.id)
-                    docPath = subRef.path
-                    val updatedPending = (sub.pendingBill + sub.monthlyBill).coerceAtMost(100_000_000L)
-                    batch.update(
-                        subRef,
-                        mapOf(
-                            "pendingBill" to updatedPending,
-                            "lastBilledMonth" to cleanMonth,
-                            "updatedAt" to FieldValue.serverTimestamp(),
-                        )
-                    )
-                }
-                batch.commit().await()
+            val updates = eligible.map { sub ->
+                sub.copy(
+                    pendingBill = (sub.pendingBill + sub.monthlyBill).coerceAtMost(100_000_000L),
+                    lastBilledMonth = cleanMonth,
+                    updatedAtMillis = now,
+                )
             }
-            Result.success(eligible.size)
+            dao.updateSubscribers(updates)
+            Result.success(updates.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docPath)
             Result.failure(e)
         }
     }

@@ -317,7 +317,7 @@ fun PaymentReceiptCard(payment: Payment) {
                     )
                 }
                 Text(
-                    text = BillingFormatters.formatTimestamp(payment.paidAt),
+                    text = BillingFormatters.formatTimestamp(payment.paidAtMillis),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
